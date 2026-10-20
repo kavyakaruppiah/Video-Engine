@@ -1,0 +1,13 @@
+services:
+  video-engine:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      VIDEO_ENGINE_DATA: /app/data
+      MAX_UPLOAD_MB: 512
+    volumes:
+      - video-engine-data:/app/data
+
+volumes:
+  video-engine-data:
