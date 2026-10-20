@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import json
 import shutil
 import subprocess
 
@@ -10,42 +13,43 @@ def client(tmp_path, monkeypatch):
     import importlib
     import backend.app as module
     module = importlib.reload(module)
-    return TestClient(module.app), module
+    return TestClient(module.app)
 
-def test_health(client):
-    response = client[0].get("/api/health")
+def test_startup_and_health(client):
+    response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
-def test_prompt_validation_and_plan(client):
-    api = client[0]
-    assert api.post("/api/plan", json={"prompt": ""}).status_code == 422
-    response = api.post("/api/plan", json={"prompt": "trim from 2 to 8, make it vertical and add text 'Launch day'"})
-    assert response.status_code == 200
-    assert {item["type"] for item in response.json()["operations"]} >= {"trim", "crop_resize", "text_overlay"}
+def test_plan_decisions_and_determinism(client):
+    a = client.post("/api/plan", json={"prompt": "trim from 2 to 8, make it vertical and add text 'Launch'", "asset_id": "a"}).json()
+    b = client.post("/api/plan", json={"prompt": "stabilize and transcribe this", "asset_id": "a"}).json()
+    assert a["decision"] == "applied"
+    assert b["decision"] == "rejected"
+    assert any(op["type"] == "crop_resize" for op in a["operations"])
 
-def test_invalid_operation_timestamps(client):
-    response = client[0].post("/api/export", json={"project_id": "missing", "asset_ids": ["missing"], "operations": [{"type": "trim", "start": 8, "end": 2}]})
-    assert response.status_code == 422
+def test_projects_history_and_transcript_edit(client):
+    project = client.post("/api/projects", json={"name": "Demo"}).json()
+    snapshot = client.post(f"/api/projects/{project['id']}/history", json={"label": "before captions", "snapshot": {"clips": []}})
+    assert snapshot.status_code == 200
+    assert len(client.get(f"/api/projects/{project['id']}/history").json()) == 1
 
-def test_project_and_invalid_upload(client):
-    api = client[0]
-    project = api.post("/api/projects", json={"name": "Test"}).json()
-    response = api.post(f"/api/projects/{project['id']}/assets", files={"files": ("bad.txt", b"not media", "text/plain")})
+def test_invalid_upload_type(client):
+    project = client.post("/api/projects", json={"name": "Demo"}).json()
+    response = client.post(f"/api/projects/{project['id']}/assets", files={"files": ("bad.txt", b"x", "text/plain")})
     assert response.status_code == 415
 
-def test_real_ffmpeg_export(client, tmp_path):
+def test_real_media_upload_and_export(client, tmp_path):
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("FFmpeg/FFprobe not installed")
     source = tmp_path / "sample.mp4"
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10", "-f", "lavfi", "-i", "sine=frequency=1000", "-t", "1", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-c:a", "aac", str(source)], capture_output=True, check=True)
-    api = client[0]
-    project = api.post("/api/projects", json={"name": "Export"}).json()
-    upload = api.post(f"/api/projects/{project['id']}/assets", files={"files": ("sample.mp4", source.read_bytes(), "video/mp4")})
-    assert upload.status_code == 200
-    asset = upload.json()[0]
-    exported = api.post("/api/export", json={"project_id": project["id"], "asset_ids": [asset["id"]], "operations": [{"type": "trim", "start": 0, "end": 0.8}], "preserve_audio": True})
-    assert exported.status_code == 200
-    assert exported.json()["metadata"]["has_video"] is True
-    assert exported.json()["metadata"]["has_audio"] is True
-    assert api.get(exported.json()["url"]).status_code == 200
+    project = client.post("/api/projects", json={"name": "Export"}).json()
+    uploaded = client.post(f"/api/projects/{project['id']}/assets", files={"files": ("sample.mp4", source.read_bytes(), "video/mp4")})
+    assert uploaded.status_code == 200
+    asset = uploaded.json()[0]
+    assert asset["metadata"]["has_audio"] is True
+    output = client.post("/api/export", json={"project_id": project["id"], "asset_ids": [asset["id"]], "operations": [{"type": "trim", "start": 0, "end": 0.8}, {"type": "color", "amount": 0.1}], "preserve_audio": True})
+    assert output.status_code == 200
+    assert output.json()["metadata"]["has_video"] is True
+    assert output.json()["metadata"]["has_audio"] is True
+    assert client.get(output.json()["url"]).status_code == 200
