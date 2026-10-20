@@ -5,19 +5,22 @@ A runnable AI-assisted video editor built with FastAPI, SQLite, FFmpeg/FFprobe, 
 ## Requirements
 
 - Python 3.11+
-- FFmpeg 6+ (`ffmpeg` and `ffprobe` on PATH)
-- Optional Ollama for richer prompt planning (`OLLAMA_URL`, `OLLAMA_MODEL`)
+- FFmpeg 6+ with `ffmpeg` and `ffprobe` on `PATH`
+- Optional Ollama for a future provider integration; the current planner is deterministic and works without paid AI keys
 
 ## Run
 
 ```bash
+git clone https://github.com/kavyakaruppiah/Video-Engine.git
+cd Video-Engine
+git checkout feature/ai-video-editor
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn backend.app:app --reload
 ```
 
-Open http://127.0.0.1:8000. The API docs are at `/docs`.
+Open `http://127.0.0.1:8000`. API documentation is available at `/docs`.
 
 ## Tests
 
@@ -25,28 +28,26 @@ Open http://127.0.0.1:8000. The API docs are at `/docs`.
 pytest -q
 ```
 
-Tests use a temporary SQLite database and generate a short synthetic MP4 with FFmpeg when available.
+The test suite covers startup, project persistence, invalid upload types, prompt validation, unsupported operations, invalid timestamps, synthetic media upload, FFprobe metadata, and a real FFmpeg MP4 export when FFmpeg is installed. Without FFmpeg, the integration test is skipped rather than falsely reported as passing.
 
-## Features
+## Supported workflow
 
-- Project create/list/reopen with SQLite metadata
-- Multi-file video/audio upload with size/type validation
-- FFprobe metadata inspection
-- Browser video preview, seeking, volume, media library, timeline selection
-- Natural-language prompt parsing into validated typed plans
-- Deterministic trimming, ordering, crop/resize, color, text overlay, fades, and audio preservation
-- MP4 export with progress and downloadable output
-- Undo/redo timeline history in the client
+1. Create or reopen a project.
+2. Import video/audio files. The server validates extensions, size, and actual FFprobe streams.
+3. Select a video to preview it and inspect duration, dimensions, frame rate, codecs, aspect ratio, and audio presence.
+4. Enter a prompt and review the typed allowlisted plan.
+5. Use the timeline to select, order visually, delete, undo, and redo clips.
+6. Export an MP4. The server validates project ownership, operation bounds, stream mapping, output readability, dimensions, and audio preservation.
 
-## Environment
+Supported deterministic operations are trimming, aspect-ratio-safe crop/resize with padding, brightness/contrast adjustment, text overlay, and fades. Unsupported effects are reported instead of executed. No model-generated shell command is ever run.
+
+## Environment variables
 
 | Variable | Default | Purpose |
 |---|---:|---|
 | `VIDEO_ENGINE_DATA` | `./data` | Media, exports, and SQLite location |
 | `MAX_UPLOAD_MB` | `512` | Maximum upload size |
-| `OLLAMA_URL` | unset | Optional local Ollama endpoint |
-| `OLLAMA_MODEL` | `llama3.2` | Optional Ollama model |
 
-## Limitations
+## Known limitations
 
-The first version intentionally supports a safe allowlist of operations. Complex transitions, motion tracking, captions/transcription, music generation, and arbitrary model-generated FFmpeg expressions are reported as unsupported. The server never executes model-provided shell commands.
+The current first version exports the selected video asset; it does not yet concatenate multiple source clips, persist timeline operation JSON, show streaming render progress, or provide transcription/captions, motion tracking, complex transitions, or music generation. Ollama provider wiring is not enabled; the deterministic planner is the safe fallback.
